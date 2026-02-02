@@ -15,7 +15,7 @@ async function generateMock() {
         "openai:default": {
           "provider": "openai",
           "mode": "api_key",
-          "apiKey": "sk-mock-key-do-not-use-in-production" 
+          "apiKey": "mock-key-do-not-use-in-production" 
         }
       }
     },

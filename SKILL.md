@@ -9,8 +9,8 @@ A utility to package an Agent's state into a portable, encrypted archive (`.oca`
 
 ## Features
 
-- **Encrypted Archive**: Uses AES-256-GCM to protect sensitive data (API keys) during transit.
-- **Path Normalization**: Automatically adjusts absolute paths (e.g. `/Users/olduser` -> `/Users/newuser`) during restore.
+- **Encrypted Archive**: Uses AES-256-GCM + auth tag for confidentiality and integrity.
+- **Path Normalization**: Restores workspace path using `manifest.json` metadata.
 - **Dependency Manifest**: Captures system dependencies (Brewfile) to ensure the new environment matches.
 
 ## Usage

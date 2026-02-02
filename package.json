@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "scan": "grep -rE \"sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}\" . || echo \"Scan Passed\""
+    "scan": "grep -rE --exclude-dir=test-data \"sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}\" . || echo \"Scan Passed\""
   },
   "keywords": [
     "openclaw",

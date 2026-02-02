@@ -2,8 +2,8 @@
 const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs-extra');
-const { createArchiveCBC } = require('./archive'); // Note: Need to export this
-const { restoreArchive, fixPaths } = require('./restore'); // Note: Need to export these
+const { createArchive } = require('./archive');
+const { restoreArchive, fixPaths } = require('./restore');
 
 const program = new Command();
 
@@ -35,18 +35,7 @@ program.command('export')
           
           console.log(`📦 Archiving sources: ${options.source.join(', ')}`);
           
-          // In a real run, we verify sources exist.
-          // For now, we assume archive.js handles non-existent dirs gracefully (it does).
-          // However, we need to import the function correctly.
-          // I need to update archive.js to export the function.
-          
-          // Since I cannot require local files that don't export, I'll update them first.
-          // But assuming I update them in the next step.
-          
-          // Dynamic require for now to simulate the structure
-          const archiveModule = require('./archive');
-          await archiveModule.createArchiveCBC(options.source, outputPath, password);
-          
+          await createArchive(options.source, outputPath, password);
           console.log(`✅ Export successful: ${outputPath}`);
       } catch (e) {
           console.error(`❌ Export failed: ${e.message}`);
@@ -72,9 +61,8 @@ program.command('import')
           await fs.ensureDir(destDir);
           console.log(`🔓 Restoring to: ${destDir}`);
           
-          const restoreModule = require('./restore');
-          await restoreModule.restoreArchive(inputPath, destDir, password);
-          await restoreModule.fixPaths(destDir);
+          await restoreArchive(inputPath, destDir, password);
+          await fixPaths(destDir);
           
           console.log(`✅ Import successful.`);
       } catch (e) {

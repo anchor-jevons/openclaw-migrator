@@ -3,97 +3,74 @@ const path = require('path');
 const archiver = require('archiver');
 const crypto = require('crypto');
 
+const MAGIC = Buffer.from('OCM1');
+const VERSION = 1;
+const ALGO_GCM = 1;
+
+function buildHeader({ salt, iv }) {
+  const header = Buffer.alloc(8);
+  MAGIC.copy(header, 0);
+  header.writeUInt8(VERSION, 4);
+  header.writeUInt8(ALGO_GCM, 5);
+  header.writeUInt8(salt.length, 6);
+  header.writeUInt8(iv.length, 7);
+  return Buffer.concat([header, salt, iv]);
+}
+
 async function createArchive(sourceDirs, outputPath, password) {
-  return new Promise((resolve, reject) => {
-    // 1. Prepare Output
+  return new Promise(async (resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
-    
-    // 2. Crypto Setup (AES-256-GCM)
-    const algorithm = 'aes-256-gcm';
+
     const salt = crypto.randomBytes(16);
-    // Derive key using scrypt (secure)
-    const key = crypto.scryptSync(password, salt, 32); 
-    const iv = crypto.randomBytes(12); // GCM standard IV size
-    
-    const cipher = crypto.createCipheriv(algorithm, key, iv);
+    const key = crypto.scryptSync(password, salt, 32);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
-    // 3. Write Header (Salt + IV) unencrypted at start of file
-    output.write(salt);
-    output.write(iv);
+    const header = buildHeader({ salt, iv });
+    output.write(header);
 
-    // 4. Pipeline: Archiver -> Cipher -> Output
-    const archive = archiver('tar', { zlib: { level: 9 } }); // Compress then Encrypt
+    const archive = archiver('tar', { gzip: true });
+    archive.on('error', reject);
 
-    output.on('close', () => {
-      console.log(`📦 Archive created: ${outputPath} (${archive.pointer()} bytes)`);
-      resolve();
-    });
+    // Add manifest with workspace root (if available)
+    const manifest = await buildManifest(sourceDirs).catch(() => null);
+    if (manifest) {
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+    }
 
-    archive.on('error', (err) => reject(err));
-    
-    // Pipe archive data into cipher
-    archive.pipe(cipher).pipe(output);
-
-    // 5. Append Directories
     for (const dir of sourceDirs) {
       if (fs.existsSync(dir)) {
-        const dirname = path.basename(dir);
-        // Store as root folders in archive
-        archive.directory(dir, dirname); 
+        archive.directory(dir, path.basename(dir));
       } else {
         console.warn(`⚠️ Warning: Source dir not found: ${dir}`);
       }
     }
 
-    // 6. Finalize
-    archive.finalize().then(() => {
-       // Get auth tag after finalization?
-       // WAIT: GCM auth tag is only available after cipher.final().
-       // Streamed GCM is tricky because the tag comes at the end.
-       // Node's crypto stream handles this? 
-       // No, we usually need to append the tag. 
-       // For simplicity in this V1 prototype, we might switch to AES-256-CBC if streaming GCM is complex,
-       // OR stick to GCM but handle the tag.
-       // Actually, cipher.getAuthTag() is available after 'end' event of cipher.
-       // But 'output' stream is already closing.
-       // Let's rely on the stream; usually the tag is appended automatically by some wrappers, but raw crypto stream doesn't.
-       
-       // FIX: Use simple AES-256-CBC for file archiving (standard practice for large files) 
-       // or append tag manually.
-       // Let's use CBC for robustness in this stream context unless we need auth.
-       // Okay, sticking to CBC for now to avoid the GCM Tag Stream issue.
+    // Pipe archive -> cipher -> output (keep output open for authTag)
+    archive.pipe(cipher).pipe(output, { end: false });
+
+    cipher.on('end', () => {
+      const authTag = cipher.getAuthTag();
+      output.write(authTag);
+      output.end();
     });
+
+    output.on('close', () => resolve());
+    output.on('error', reject);
+
+    archive.finalize();
   });
 }
 
-// Wrapper for CBC Stream (Simpler for streams)
-async function createArchiveCBC(sourceDirs, outputPath, password) {
-    return new Promise((resolve, reject) => {
-        const output = fs.createWriteStream(outputPath);
-        const salt = crypto.randomBytes(16);
-        const key = crypto.scryptSync(password, salt, 32);
-        const iv = crypto.randomBytes(16); // CBC IV is 16 bytes
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-
-        // Write Header
-        output.write(salt);
-        output.write(iv);
-
-        const archive = archiver('tar', { gzip: true });
-
-        output.on('close', resolve);
-        archive.on('error', reject);
-
-        archive.pipe(cipher).pipe(output);
-
-        for (const dir of sourceDirs) {
-            if (fs.existsSync(dir)) {
-                archive.directory(dir, path.basename(dir));
-            }
-        }
-
-        archive.finalize();
-    });
+async function buildManifest(sourceDirs) {
+  // Try to read workspace from openclaw.json if present
+  const configDir = sourceDirs.find((d) => path.basename(d) === '.openclaw');
+  if (!configDir) return null;
+  const configPath = path.join(configDir, 'openclaw.json');
+  if (!fs.existsSync(configPath)) return null;
+  const json = await fs.readJson(configPath);
+  const workspace = json?.agents?.defaults?.workspace || null;
+  return { workspace, createdAt: new Date().toISOString() };
 }
 
 // CLI Driver
@@ -110,9 +87,9 @@ if (require.main === module) {
         process.exit(1);
     }
 
-    createArchiveCBC(src, dest, pass)
+    createArchive(src, dest, pass)
         .then(() => console.log("✅ Done."))
         .catch(err => console.error("❌ Failed:", err));
 }
 
-module.exports = { createArchiveCBC };
+module.exports = { createArchive };
